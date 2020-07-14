@@ -9,8 +9,7 @@ template <typename T>
 void print(vector<T> &v)
 {
     const int n = v.size();
-    for (int i = 0; i < n; ++i)
-    {
+    for (int i = 0; i < n; ++i) {
         cout << v[i] << "  ";
     }
     cout << endl;
@@ -653,7 +652,8 @@ void ReadTSplineData(
     int& nsections, vector<int>& section_limits, 
     vector<double>& knotW, vector<double>& elRangeW, 
     vector<double>& coords, vector<double>& weight, 
-    unordered_map<int, vector<int>>& IEN, unordered_map<int,vector<vector<double>>>& BEXT,
+    unordered_map<int, vector<int>>& IEN, 
+    unordered_map<int,vector<vector<double>>>& BEXT,
     const int& nsolids, const int& poly3) 
 {
     cout << "\n**Start reading t-spline input file.\n";
@@ -980,15 +980,6 @@ void ReadTSplineData(
     }
     infile.close();
 
-    // cout << "\nCHECK SECTION INPUT \n";
-    // cout << "number of sections: " << nsections << endl;
-    // const int nlimits = section_limits.size();
-    // for (int i = 0; i < nlimits; ++i)
-    // {
-    //  cout << section_limits[i] << "\t";
-    // }
-    // cout << "\n\n";
-
     cout << "**End reading t-spline input file.\n";
 }
 
@@ -1004,23 +995,43 @@ void generateThruThicknessData(
     const std::unordered_map <int, vector <int> > &IEN_newbot,
     const std::map <int, vector <double> > &NODES_top, 
     const std::unordered_map <int, vector <int> > &IEN_top,
+    const std::unordered_map <int, vector<vector<double>> > BEXT,
     std::unordered_map <int, vector <double> > &NODES, 
     std::unordered_map <int, user_element> &MESH)
 {
 
+
+    //===========================================
+    // MOVE TO INPUT
+    string finp = "test.inp";
+    string ftsp = "test.tsplines";
+
+    const double totalThickness = 0.04;
+    const double tlayer = totalThickness / NL;
+    vector <double> thickness;
+    vector <double> fiber_angle;
+    for (int i = 0; i < NL; ++i) {
+        thickness.push_back(tlayer);
+        fiber_angle.push_back(0.0);
+    }
+    // do not change (this is for the Abaqus input file)
+    const int max_col = 16;
+    //===========================================
+
+
+
+    //===================================================================
+    // add all the nodes on the bottom to the NODES structure
+    //  (we assume the bottom surface nodes are labeled 1 to N)
+    //===================================================================
+
     // number of planes of control points through the thickness
     const int numPlanes = NL * poly3 + 1;
     const double dt = 1.0 / (numPlanes - 1);
+    const int NELEM = IEN_newbot.size();
 
-    unordered_map < int, vector<int> > IEN;
-
-    // add all the nodes on the bottom to the NODES structure
-    //  (we assume the bottom surface nodes are labeled 1 to N)
-    
-    int id;
+    int id, newID;
     double t;
-    // int count = 0;
-
 
     const int m = NODES_bot.size();
     const int n = NODES_top.size();
@@ -1028,16 +1039,18 @@ void generateThruThicknessData(
     vec3 botNode;
     vec3 topNode;
     vec3 intNode;
+
     vector<int> ien;
     vector<double> temp;
+
+    unordered_map < int, vector<int> > IEN;
+    unordered_map < int, int > BID;
 
     if (m != n) {
         cout << "ERROR: number of nodes in the top set does not match bottom set" << endl;
     }
     else {
-
         for (auto const& it : NODES_bot) {
-            // std::cout << it.first << std::endl;
             id = it.first;
             NODES[id] = it.second;
             
@@ -1050,118 +1063,175 @@ void generateThruThicknessData(
             t = dt;
             for (int k = 1; k < (numPlanes - 1); ++k) {
                 interpolateNode(t, botNode, topNode, intNode);
-
                 temp[0] = intNode.x;
                 temp[1] = intNode.y;
                 temp[2] = intNode.z;
                 NODES[id + k * n] = temp;
-
                 t += dt;
             }
         }
     }
 
-
     // add all the nodes on the top to the NODES structure
     int count = NODES.size();
-    for (auto const& it : NODES_top)
-    {
-        // std::cout << it.first << std::endl ;
+    for (auto const& it : NODES_top) {
         id = it.first;
         count++;
         NODES[count] = it.second;
     }
 
     // write all nodes to new .inp file
-    string finp = "test.inp";
-    std::ofstream outFile(finp);
-    outFile.precision(8);
-    outFile.setf( std::ios::fixed, std:: ios::floatfield );  // floatfield set to fixed   
+    std::ofstream inpFile(finp);
+    inpFile.precision(8);
+    inpFile.setf( std::ios::fixed, std:: ios::floatfield );  // floatfield set to fixed   
     
-    if (outFile.is_open()) {
+    // tsplines file
+    std::ofstream tspFile(ftsp);
+    tspFile.precision(8);
+    tspFile.setf( std::ios::fixed, std:: ios::floatfield );  // floatfield set to fixed   
 
-        outFile << "*HEADING" << endl;
-        outFile << "*PART, NAME=PART-1" << endl;
+    if ( inpFile.is_open() && tspFile.is_open() ) {
 
+        // start the Abaqus input file
+        inpFile << "*HEADING" << endl;
+        inpFile << "*PART, NAME=PART-1" << endl;
+
+        // ASSUME only one section for now to work with CMU tool
+        tspFile << "**Bezier Extraction Data" << endl;
+        tspFile << "*number of sections\n" << "1" << endl;
+        tspFile << "*section limits\n" << "1, " << (NL * NELEM) << endl;
+
+        // ASSUME uniform thickness 
+        // OR later update to take different layer thickness as input
+        tspFile << "*number of layers" << endl;
+        tspFile << NL << endl;
+        tspFile << "*thickness" << endl;
+        for (int i = 0; i < NL; ++i) {
+            tspFile << thickness[i] << endl;
+        }
+
+        // input
+        tspFile << "*fiber angle" << endl;
+        for (int i = 0; i < NL; ++i) {
+            tspFile << fiber_angle[i] << endl;
+        }        
+
+        // write out the knotW vector
+        tspFile << "*knotW" << endl;
+        vector <double> knotW;
+        for (int i = 0; i < (poly3 + 1); ++i) {
+            tspFile << "0, ";
+            knotW.push_back(0.0);
+        }
+        const double dw = 1.0 / NL;
+        double w = dw;
+        for (int i = 0; i < (NL-1); ++i) {
+            for (int j = 0; j < poly3; ++j) {
+                tspFile << w << ", ";
+                knotW.push_back(w);
+            }
+            w += dw;
+        }
+        tspFile << "1";
+        for (int i = 0; i < poly3; ++i) {
+            tspFile << ", 1";
+            knotW.push_back(1.0);
+        }
+        tspFile << endl;
+
+        // input
+        tspFile << "*elRangeW" << endl;
+        double a, b;
+        const int nw = knotW.size();
+        a = knotW[0];
+        for (int i = 1; i < nw; ++i) {
+            b = knotW[i];
+            if (b != a) {
+                tspFile << a << ", ";
+                tspFile << b << endl;
+                a = b;
+            }
+        }
+
+        // coordinate date
+        inpFile << "*NODE" << endl;
+        tspFile << "*coordinates" << endl;
         const int N = NODES.size();
-        outFile << "*NODE" << endl;
-        for (int i = 1; i <= N; ++i) {           
-            outFile << i;
+        for (int i = 1; i <= N; ++i) {
+            inpFile << i;
             temp = NODES.at(i);
             for (int j = 0; j < DIM; ++j) {
-                outFile << ", " << temp[j];
+                inpFile << ", " << temp[j];
+                tspFile << temp[j] << "\t";
             }
-            outFile << "\n";
+            inpFile << "\n";
+            tspFile << "\n";
         }        
-        //=================================================
 
+        // weights (assume all weights are 1.0)
+        tspFile << "*weights" << endl;
+        for (int i = 1; i <= N; ++i)  tspFile << "1.0" << endl;
+
+        //=================================================
 
         vector<int> elem;
         unordered_map< int, vector<int> > elem_type;
         int nnode;
-        // user_element test;
-        // const int numElemPlane = IEN_newbot.size();
-
-        // for (int k = 0; k < NL; ++k) {
         for (auto const& it : IEN_newbot) {
             
             id = it.first;
-            // id -= Ntop;
-
             elem = it.second;
-            nnode = elem.size();
-            // cout << id << "  " << nnode << endl;
-            elem_type[nnode].push_back(id);
 
+            nnode = elem.size();
+            elem_type[nnode].push_back(id);
+            
             user_element test;
             test.unodes = nnode * (poly3 + 1);
             test.utype = nnode;
             test.uproperties = PROPS;
             test.ucoordinates = DIM;
             test.uvariables = SVARS;
-
             MESH[nnode] = test;
         }
-        // }
 
         vector <int> ien, ien_full;
         int k, nelem, inode;
-        const int max_col = 16;
-        const int NELEM = IEN_newbot.size();
 
         for (auto const& it : elem_type) {
             
             user_element test = MESH.at(it.first);
-            outFile << "**\n*USER ELEMENT";
-            outFile << ", NODES=" << test.unodes;
-            outFile << ", TYPE=U" << test.utype;
-            outFile << ", PROP=" << test.uproperties;
-            outFile << ", COORD=" << test.ucoordinates;
-            outFile << ", VAR=" << test.uvariables;
-            outFile << "\n1, 2, 3" << endl;
+            inpFile << "**\n*USER ELEMENT";
+            inpFile << ", NODES=" << test.unodes;
+            inpFile << ", TYPE=U" << test.utype;
+            inpFile << ", PROP=" << test.uproperties;
+            inpFile << ", COORD=" << test.ucoordinates;
+            inpFile << ", VAR=" << test.uvariables;
+            inpFile << "\n1, 2, 3" << endl;
 
-            outFile << "*ELEMENT";
-            outFile << ", TYPE=U" << test.utype;
-            outFile << ", ELSET=UEL" << test.utype;
-            outFile << endl;
+            inpFile << "*ELEMENT";
+            inpFile << ", TYPE=U" << test.utype;
+            inpFile << ", ELSET=UEL" << test.utype;
+            inpFile << endl;
 
             nelem = it.second.size();
             for (int i = 0; i < nelem; ++i) {
                 
                 id = it.second[i];
+                nnode = (IEN_newbot.at(id)).size();
                 ien.clear();
-                ien = IEN_newbot.at(id);
-                nnode = ien.size();
+                ien.resize(nnode);
 
                 for (int ilayer = 0; ilayer < NL; ++ilayer) {
+                    
                     // update element index
-                    id += (ilayer * NELEM);
-                    outFile << id;
+                    newID = id + (ilayer * NELEM);
+                    inpFile << newID;
                     k = 1;
+                    ien_full.clear();
 
                     // update the ien to start at the bottom of the layer
                     for (int j = 0; j < nnode; ++j) {
-                        ien[j] += ilayer * m * poly3;
+                        ien[j] = (IEN_newbot.at(id))[j] + (ilayer * m * poly3);
                     }
 
                     // loop over the control point layers in the element
@@ -1174,36 +1244,73 @@ void generateThruThicknessData(
 
                             // write to output file
                             if (k < max_col) {
-                                outFile << ", " << inode;
+                                inpFile << ", " << inode;
                                 k++;
                             }
                             else {
-                                outFile << ",\n" << inode;
+                                inpFile << ",\n" << inode;
                                 k = 1;
                             }
                         }
                     }
-                    outFile << endl;
-                    IEN[id] = ien_full;
+                    inpFile << endl;
+                    IEN[newID] = ien_full;
+                    BID[newID] = id;
                 }
             }
         }
 
-        outFile << "**\n*ELSET, ELSET=ALL_UEL, GENERATE" << endl;
-        outFile << "1, " << IEN.size() << ", 1" << endl;
+        inpFile << "**\n*ELSET, ELSET=ALL_UEL, GENERATE" << endl;
+        inpFile << "1, " << IEN.size() << ", 1" << endl;
 
-        outFile << "*UEL PROPERTY, ELSET=ALL_UEL" << endl;
-        outFile << "6.825e7, 6.825e7, 6.825e7, 2.625e7, 2.625e7, 2.625e7, 0.3, 0.3," << endl;
-        outFile << "0.3" << endl;
+        // MOVE THIS TO INPUT
+        inpFile << "*UEL PROPERTY, ELSET=ALL_UEL" << endl;
+        inpFile << "6.825e7, 6.825e7, 6.825e7, 2.625e7, 2.625e7, 2.625e7, 0.3, 0.3," << endl;
+        inpFile << "0.3" << endl;
 
-        outFile << "*END PART\n**" << endl;
-        outFile << "**==========================================================" << endl;
+        inpFile << "*END PART\n**" << endl;
+        inpFile << "**==========================================================" << endl;
 
+        tspFile << "*bext" << endl;
+        vector< vector <double> > bext;
+        int m1, m2;
+        for (unsigned int elem = 1; elem <= IEN.size(); ++elem) {
+            ien_full = IEN.at(elem);
+            nnode = ien_full.size();
 
-        
+            // write out the full IEN but shift to 0-based numbering
+            tspFile << "belem " << nnode << " 3 3" << endl;
+            for (int i = 0; i < nnode; ++i) {
+                tspFile << (ien_full[i] - 1) << "\t";
+            }
+            tspFile << endl;
 
+            // write out the Bezier extraction matrix
+            id = BID.at(elem);
+            bext = BEXT.at(id - 1);
 
-        outFile.close();
+            m1 = bext.size();
+            m2 = bext[0].size();
+
+            // cout << elem << ", " << BID.at(elem) << ", " << id << endl;
+            // cout << m1 << ", " << m2 << endl;            
+            // for (int i = 0; i < m2; ++i)
+            // {
+            //     // cout << i << ", " << bext[0][i] << endl;
+            // }
+
+            for (int i = 0; i < m1; ++i) {
+                for (int j = 0; j < m2; ++j) {
+                    tspFile << bext[i][j] << "\t";
+                }
+                tspFile << endl;
+            }
+
+        }
+
+        // close the output files
+        inpFile.close();
+        tspFile.close();
     }
     else {
         LOG("you forgot to open the file!");

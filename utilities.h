@@ -79,5 +79,6 @@ void generateThruThicknessData(
     const std::unordered_map <int, vector <int> > &IEN_newbot,
     const std::map <int, vector <double> > &NODES_top, 
     const std::unordered_map <int, vector <int> > &IEN_top,
+    const std::unordered_map <int, vector<vector<double>> > BEXT,
     std::unordered_map <int, vector <double> > &NODES, 
     std::unordered_map <int, user_element> &MESH);
